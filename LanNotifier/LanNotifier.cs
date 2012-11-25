@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -9,13 +10,14 @@ using System.Threading;
 
 namespace LanNotifier
 {
+
     /// <summary>
     /// Notifies of new MACs connecting and disconnecting onto the same LAN network as machine's subnet domain;
     /// Example, my machine has IP 10.0.1.5. The iPhone connects to the same LAN and router assignes DHCP dynamically; 
     /// The IP Range  10.0.1.1-127 will be pinged and arp -a command will be launched every second to see changes.
     /// </summary>
     /// <example><code>
-    ///    var networkWatcher = new ArpPinger();
+    ///    var networkWatcher = new MacWatcher();
     ///    networkWatcher.MacConnected += new EventHandler&lt;string&gt;(networkWatcher_MacConnected);
     ///    networkWatcher.MacDisconnected += new EventHandler&lt;string&gt;(networkWatcher_MacDisconnected);
     ///    networkWatcher.WatchNetwork();</code>
@@ -24,11 +26,14 @@ namespace LanNotifier
     /// <remarks>http://stackoverflow.com/questions/2567107/ping-or-otherwise-tell-if-a-device-is-on-the-network-by-mac-in-c-sharp</remarks>
     public class MacWatcher
     {
+        public event EventHandler<Dictionary<string, string>> FirstAddressesLoaded;
         public event EventHandler<KeyValuePair<string, string>> MacConnected;
         public event EventHandler<KeyValuePair<string, string>> MacDisconnected;
 
         private delegate void WatchNetworkDelegate();
         private WatchNetworkDelegate watchNetworkDelegate;
+
+        ConcurrentDictionary<string, string> macCache = null;
 
         public MacWatcher()
         {
@@ -40,34 +45,43 @@ namespace LanNotifier
             watchNetworkDelegate.BeginInvoke(null, null);
         }
 
+        //public List<string> GetLanIPs()
+        //{
+        //    if (macCache == null) return null;
+        //    return macCache.Values.Distinct().ToList();
+        //}
+
         /// <summary>
         /// Infinatelly loops to fire off MAC notification events. On same thread.
         /// </summary>
         public void WatchNetwork()
         {
-            Dictionary<string,string> macCache = null;
             while (true)
             {
                 var macs = new MacWatcher().GetMacsInLan();
 
                 if (macCache == null)
                 {
-                    macCache = new Dictionary<string, string>(macs);
-                    ConsoleDebug(macs);
+                    macCache = new ConcurrentDictionary<string, string>(macs);
+                    if (this.FirstAddressesLoaded != null)
+                    {
+                        ConsoleDebug(macs);
+                        FirstAddressesLoaded(this, new Dictionary<string, string>(macCache));
+                    }
                 }
 
                 var newlyconnected = macs.Except(macCache);
                 var disconnected = macCache.Except(macs);
 
                 foreach (var mac in disconnected)
-                    if (this.MacDisconnected != null) 
+                    if (this.MacDisconnected != null)
                         this.MacDisconnected(this, mac);
-                
+
                 foreach (var mac in newlyconnected)
                     if (this.MacConnected != null)
                         this.MacConnected(this, mac);
 
-                macCache = new Dictionary<string, string>(macs);
+                macCache = new ConcurrentDictionary<string, string>(macs);
 
                 System.Threading.Thread.Sleep(1000);
             }
@@ -76,13 +90,13 @@ namespace LanNotifier
         [Conditional("DEBUG")]
         private void ConsoleDebug(Dictionary<string, string> macs)
         {
-            foreach (var mac in macs) 
+            foreach (var mac in macs)
                 Console.WriteLine("found Mac: " + mac);
         }
 
-        public Dictionary<string,string> GetMacsInLan()
+        public Dictionary<string, string> GetMacsInLan()
         {
-            var foundMacs = new Dictionary<string,string>();
+            var foundMacs = new Dictionary<string, string>();
             // refresh by pinging all subnets
             var baseIP = IPUtil.ConvertToBaseIP(IPUtil.GetMyIpAddress());
 
@@ -90,7 +104,7 @@ namespace LanNotifier
             //ClearARPCache();
 
             PingAllSubnet(baseIP);
-            
+
             // We're going to parse the output of arp.exe to find out if any all MACs online
             ProcessStartInfo psi = new ProcessStartInfo();
             psi.FileName = "arp.exe";
@@ -116,7 +130,7 @@ namespace LanNotifier
                         string[] parts = s.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
 
                         var hostnameOrAddress = parts[0].Trim(); // may be IP address, must resolve.
-                        
+
                         var foundMac = parts[1].Trim().ToLower();
                         if (!foundMacs.ContainsKey(foundMac))
                             foundMacs.Add(foundMac, hostnameOrAddress);

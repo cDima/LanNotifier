@@ -1,9 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using System.Linq;
 using System.Net;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace LanNotifier
 {
@@ -38,7 +34,7 @@ namespace LanNotifier
             {
                 var hostname = Dns.GetHostEntry(hostnameOrAddress);
                 return hostname.HostName ?? hostnameOrAddress;
-            }catch (System.Net.Sockets.SocketException ex)
+            }catch (System.Net.Sockets.SocketException)
             {
                 return hostnameOrAddress;
             }
